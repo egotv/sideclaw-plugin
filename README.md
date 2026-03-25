@@ -7,14 +7,19 @@ An OpenClaw channel plugin that connects an OpenClaw agent to SideClaw for real-
 
 ## Install
 
-```bash
-npm install @egoai/sideclaw
-```
-
-Register the plugin with your OpenClaw gateway:
+### From npm
 
 ```bash
 openclaw plugins install @egoai/sideclaw
+```
+
+### From source
+
+```bash
+git clone https://github.com/egotv/sideclaw-plugin.git
+cd sideclaw-plugin
+npm install
+openclaw plugins install .
 ```
 
 ## Configuration
@@ -67,10 +72,9 @@ OpenClaw gateways typically run on a user's local machine behind NAT, so SideCla
 
 ## Development
 
+After cloning and installing (see "From source" above), run type checking with:
+
 ```bash
-git clone https://github.com/egotv/sideclaw-plugin.git
-cd sideclaw-plugin
-npm install
 npm run type-check
 ```
 

@@ -142,38 +142,69 @@ function waitForMessage(
 }
 
 /**
- * Fetch the agent list from the gateway via an `agents.list` RPC call.
- * Returns the agents array, or an empty array on failure.
+ * Fetch the agent list from the gateway via `agents.list` + `config.get` RPC.
+ *
+ * Merges `agents.defaults.workspace` into each agent that lacks its own,
+ * so `resolveWorkspace` always has a workspace to resolve.
  */
 function fetchAgents(gatewayWs: WebSocket, logger?: any): Promise<any[]> {
   return new Promise<any[]>((resolve) => {
-    const reqId = `ws-read-${Date.now()}`;
-    const timeout = setTimeout(() => {
+    const agentsReqId = `ws-agents-${Date.now()}`;
+    const configReqId = `ws-config-${Date.now()}`;
+    let agentsList: any[] | null = null;
+    let defaultWorkspace: string | null = null;
+    let replies = 0;
+
+    const tryFinish = () => {
+      replies++;
+      if (replies < 2) return;
+      clearTimeout(timer);
       gatewayWs.removeEventListener("message", onReply);
-      logger?.warn?.("workspace.read: agents.list RPC timed out");
-      resolve([]);
+
+      // Merge default workspace into agents that lack their own
+      const agents = agentsList ?? [];
+      if (defaultWorkspace) {
+        for (const agent of agents) {
+          if (!agent.workspace) {
+            agent.workspace = defaultWorkspace;
+          }
+        }
+      }
+      resolve(agents);
+    };
+
+    const timer = setTimeout(() => {
+      gatewayWs.removeEventListener("message", onReply);
+      logger?.warn?.("workspace.read: gateway RPC timed out fetching agents/config");
+      resolve(agentsList ?? []);
     }, 5_000);
 
     const onReply = (ev: MessageEvent) => {
       const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
-      if (!raw.includes(reqId)) return;
       try {
         const frame = JSON.parse(raw);
-        if (frame.id === reqId && frame.type === "res") {
-          clearTimeout(timeout);
-          gatewayWs.removeEventListener("message", onReply);
-          const agents = frame.result?.agents ?? frame.payload?.agents ?? [];
-          resolve(Array.isArray(agents) ? agents : []);
+        if (frame.type !== "res") return;
+
+        if (frame.id === agentsReqId) {
+          agentsList = frame.result?.agents ?? frame.payload?.agents ?? [];
+          if (!Array.isArray(agentsList)) agentsList = [];
+          tryFinish();
+        } else if (frame.id === configReqId) {
+          const cfg = frame.result ?? frame.payload ?? {};
+          defaultWorkspace = cfg?.agents?.defaults?.workspace?.trim() || null;
+          tryFinish();
         }
       } catch { /* ignore parse errors on other messages */ }
     };
 
     gatewayWs.addEventListener("message", onReply);
+
+    // Fire both RPCs in parallel
     gatewayWs.send(JSON.stringify({
-      type: "req",
-      id: reqId,
-      method: "agents.list",
-      params: {},
+      type: "req", id: agentsReqId, method: "agents.list", params: {},
+    }));
+    gatewayWs.send(JSON.stringify({
+      type: "req", id: configReqId, method: "config.get", params: {},
     }));
   });
 }

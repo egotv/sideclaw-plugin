@@ -141,18 +141,25 @@ function waitForMessage(
   });
 }
 
+/** Result from fetching agent info from the gateway. */
+type AgentInfo = {
+  agents: any[];
+  defaultWorkspace: string | undefined;
+};
+
 /**
- * Fetch the agent list from the gateway via `agents.list` + `config.get` RPC.
+ * Fetch agent info from the gateway via `agents.list` + `config.get` RPC.
  *
- * Merges `agents.defaults.workspace` into each agent that lacks its own,
- * so `resolveWorkspace` always has a workspace to resolve.
+ * Returns the agents array and the default workspace (from `agents.defaults.workspace`).
+ * Both are used by `resolveWorkspace`: agent-specific workspace takes priority,
+ * default workspace is the fallback.
  */
-function fetchAgents(gatewayWs: WebSocket, logger?: any): Promise<any[]> {
-  return new Promise<any[]>((resolve) => {
+function fetchAgentInfo(gatewayWs: WebSocket, logger?: any): Promise<AgentInfo> {
+  return new Promise<AgentInfo>((resolve) => {
     const agentsReqId = `ws-agents-${Date.now()}`;
     const configReqId = `ws-config-${Date.now()}`;
     let agentsList: any[] | null = null;
-    let defaultWorkspace: string | null = null;
+    let defaultWorkspace: string | undefined = undefined;
     let replies = 0;
 
     const tryFinish = () => {
@@ -160,23 +167,13 @@ function fetchAgents(gatewayWs: WebSocket, logger?: any): Promise<any[]> {
       if (replies < 2) return;
       clearTimeout(timer);
       gatewayWs.removeEventListener("message", onReply);
-
-      // Merge default workspace into agents that lack their own
-      const agents = agentsList ?? [];
-      if (defaultWorkspace) {
-        for (const agent of agents) {
-          if (!agent.workspace) {
-            agent.workspace = defaultWorkspace;
-          }
-        }
-      }
-      resolve(agents);
+      resolve({ agents: agentsList ?? [], defaultWorkspace });
     };
 
     const timer = setTimeout(() => {
       gatewayWs.removeEventListener("message", onReply);
       logger?.warn?.("workspace.read: gateway RPC timed out fetching agents/config");
-      resolve(agentsList ?? []);
+      resolve({ agents: agentsList ?? [], defaultWorkspace });
     }, 5_000);
 
     const onReply = (ev: MessageEvent) => {
@@ -191,7 +188,7 @@ function fetchAgents(gatewayWs: WebSocket, logger?: any): Promise<any[]> {
           tryFinish();
         } else if (frame.id === configReqId) {
           const cfg = frame.result ?? frame.payload ?? {};
-          defaultWorkspace = cfg?.agents?.defaults?.workspace?.trim() || null;
+          defaultWorkspace = cfg?.agents?.defaults?.workspace?.trim() || undefined;
           tryFinish();
         }
       } catch { /* ignore parse errors on other messages */ }
@@ -227,7 +224,7 @@ function relayFrames(
   signal: AbortSignal,
   logger?: any,
 ): Promise<void> {
-  let cachedAgents: any[] | null = null;
+  let cachedInfo: AgentInfo | null = null;
 
   return new Promise<void>((resolve) => {
     let resolved = false;
@@ -252,13 +249,13 @@ function relayFrames(
         try {
           const frame = JSON.parse(raw) as RpcRequest;
           if (frame.type === "req" && frame.method === "workspace.read") {
-            // Fetch agents from gateway (cached after first call), then handle locally
-            const agentsPromise = cachedAgents !== null
-              ? Promise.resolve(cachedAgents)
-              : fetchAgents(b, logger).then((agents) => { cachedAgents = agents; return agents; });
+            // Fetch agent info from gateway (cached after first call), then handle locally
+            const infoPromise = cachedInfo !== null
+              ? Promise.resolve(cachedInfo)
+              : fetchAgentInfo(b, logger).then((info) => { cachedInfo = info; return info; });
 
-            agentsPromise
-              .then((agents) => handleWorkspaceRead(agents, frame.params as WorkspaceReadParams, logger))
+            infoPromise
+              .then((info) => handleWorkspaceRead(info.agents, frame.params as WorkspaceReadParams, logger, info.defaultWorkspace))
               .then((result) => {
                 const resp: RpcResponse = result.ok
                   ? { type: "res", id: frame.id, ok: true, payload: result.payload }

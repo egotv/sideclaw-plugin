@@ -142,7 +142,7 @@ describe("aToB interception flow", () => {
     expect(response).not.toBeNull();
     expect(response!.ok).toBe(false);
     expect(response!.error).toBeDefined();
-    expect(response!.error!.message).toMatch(/not found/i);
+    expect(response!.error!.message).toMatch(/no workspace configured/i);
     expect(response!.id).toBe("rpc-003");
   });
 

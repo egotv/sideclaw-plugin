@@ -100,9 +100,16 @@ function toWorkspaceRelative(filePath: string, workspaceRoot: string): string {
  * Accepts agents in the format returned by the `agents.list` RPC:
  *   `[{id, workspace, ...}, ...]`
  *
- * No fallback to default workspace — fails explicitly if agent not found.
+ * Resolution order:
+ *   1. Agent-specific workspace (from agents list, matched by id)
+ *   2. Default workspace (from `agents.defaults.workspace` in config)
+ *   3. Error — no workspace available
  */
-export function resolveWorkspace(agents: any[], sessionKey: string): string {
+export function resolveWorkspace(
+  agents: any[],
+  sessionKey: string,
+  defaultWorkspace?: string,
+): string {
   const key = sessionKey.trim();
   if (!key) {
     throw new Error("sessionKey is required for workspace resolution");
@@ -118,16 +125,15 @@ export function resolveWorkspace(agents: any[], sessionKey: string): string {
     throw new Error(`Cannot parse agent ID from sessionKey: ${key}`);
   }
 
+  // Try agent-specific workspace first
   const list = Array.isArray(agents) ? agents : [];
   const agentEntry = list.find(
     (a: any) => typeof a?.id === "string" && a.id.toLowerCase() === agentId,
   );
 
-  if (!agentEntry) {
-    throw new Error(`Agent '${agentId}' not found in gateway config`);
-  }
+  const agentWorkspace = agentEntry?.workspace?.trim();
+  const workspace = agentWorkspace || defaultWorkspace?.trim();
 
-  const workspace = (agentEntry as any)?.workspace?.trim();
   if (!workspace) {
     throw new Error(`No workspace configured for agent '${agentId}'`);
   }
@@ -142,19 +148,21 @@ export function resolveWorkspace(agents: any[], sessionKey: string): string {
  * Top-level handler for workspace.read RPC.
  * Returns {ok, payload} or {ok: false, error} — never throws.
  *
- * @param agents - Agent list in the format from `agents.list` RPC: `[{id, workspace, ...}]`
+ * @param agents - Agent list from `agents.list` RPC: `[{id, workspace, ...}]`
+ * @param defaultWorkspace - Fallback workspace from `agents.defaults.workspace`
  */
 export async function handleWorkspaceRead(
   agents: any[],
   params: WorkspaceReadParams,
   logger?: { warn?: (...args: any[]) => void; info?: (...args: any[]) => void },
+  defaultWorkspace?: string,
 ): Promise<{ ok: true; payload: FileEntry[] } | { ok: false; error: string }> {
   try {
     if (!params.sessionKey) {
       return { ok: false, error: "sessionKey is required for workspace.read" };
     }
 
-    const workspaceRoot = resolveWorkspace(agents, params.sessionKey);
+    const workspaceRoot = resolveWorkspace(agents, params.sessionKey, defaultWorkspace);
     await ensureWorkspaceExists(workspaceRoot);
 
     const recursive = params.recursive !== false;

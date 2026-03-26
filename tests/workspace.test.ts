@@ -198,10 +198,10 @@ describe("resolveWorkspace", () => {
     expect(result).toBe("/workspace/myagent");
   });
 
-  it("throws when agent not found", () => {
-    const cfg = makeAgents([{ id: "other", workspace: "/workspace/other" }]);
-    expect(() => resolveWorkspace(cfg, "agent:myagent:session123")).toThrow(
-      "Agent 'myagent' not found in gateway config",
+  it("throws when agent not found and no default workspace", () => {
+    const agents = makeAgents([{ id: "other", workspace: "/workspace/other" }]);
+    expect(() => resolveWorkspace(agents, "agent:myagent:session123")).toThrow(
+      "No workspace configured for agent 'myagent'",
     );
   });
 
@@ -224,9 +224,26 @@ describe("resolveWorkspace", () => {
     );
   });
 
-  it("does NOT fall back to a default workspace", () => {
-    const cfg = makeAgents([{ id: "other", workspace: "/workspace/other" }]);
-    expect(() => resolveWorkspace(cfg, "agent:unknown:session")).toThrow();
+  it("throws when agent not found and no default", () => {
+    const agents = makeAgents([{ id: "other", workspace: "/workspace/other" }]);
+    expect(() => resolveWorkspace(agents, "agent:unknown:session")).toThrow();
+  });
+
+  it("falls back to default workspace when agent has no workspace", () => {
+    const agents = [{ id: "myagent" }]; // no workspace field
+    const result = resolveWorkspace(agents, "agent:myagent:session", "/default/workspace");
+    expect(result).toBe("/default/workspace");
+  });
+
+  it("falls back to default workspace when agent not in list", () => {
+    const result = resolveWorkspace([], "agent:main:session", "/default/workspace");
+    expect(result).toBe("/default/workspace");
+  });
+
+  it("prefers agent-specific workspace over default", () => {
+    const agents = [{ id: "myagent", workspace: "/specific" }];
+    const result = resolveWorkspace(agents, "agent:myagent:session", "/default/workspace");
+    expect(result).toBe("/specific");
   });
 });
 
@@ -320,10 +337,10 @@ describe("handleWorkspaceRead", () => {
     expect(result.payload[0].content).toBe("only-me");
   });
 
-  it("returns error when agent is not found in config", async () => {
+  it("returns error when agent not found and no default workspace", async () => {
     const result = await handleWorkspaceRead([], { sessionKey: SESSION_KEY });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toMatch(/not found/i);
+    expect(result.error).toMatch(/no workspace configured/i);
   });
 });

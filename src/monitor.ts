@@ -185,10 +185,12 @@ function fetchAgentInfo(gatewayWs: WebSocket, logger?: any): Promise<AgentInfo> 
         if (frame.id === agentsReqId) {
           agentsList = frame.result?.agents ?? frame.payload?.agents ?? [];
           if (!Array.isArray(agentsList)) agentsList = [];
+          logger?.info?.(`workspace.read: agents.list returned ${agentsList.length} agents`);
           tryFinish();
         } else if (frame.id === configReqId) {
           const cfg = frame.result ?? frame.payload ?? {};
           defaultWorkspace = cfg?.agents?.defaults?.workspace?.trim() || undefined;
+          logger?.info?.(`workspace.read: config.get defaultWorkspace=${defaultWorkspace ?? "(none)"}`);
           tryFinish();
         }
       } catch { /* ignore parse errors on other messages */ }
@@ -197,6 +199,7 @@ function fetchAgentInfo(gatewayWs: WebSocket, logger?: any): Promise<AgentInfo> 
     gatewayWs.addEventListener("message", onReply);
 
     // Fire both RPCs in parallel
+    logger?.info?.(`workspace.read: fetching agents (${agentsReqId}) and config (${configReqId}) from gateway`);
     gatewayWs.send(JSON.stringify({
       type: "req", id: agentsReqId, method: "agents.list", params: {},
     }));

@@ -141,93 +141,29 @@ function waitForMessage(
   });
 }
 
-/** Result from fetching agent info from the gateway. */
-type AgentInfo = {
-  agents: any[];
-  defaultWorkspace: string | undefined;
-};
-
-/**
- * Fetch agent info from the gateway via `agents.list` + `config.get` RPC.
- *
- * Returns the agents array and the default workspace (from `agents.defaults.workspace`).
- * Both are used by `resolveWorkspace`: agent-specific workspace takes priority,
- * default workspace is the fallback.
- */
-function fetchAgentInfo(gatewayWs: WebSocket, logger?: any): Promise<AgentInfo> {
-  return new Promise<AgentInfo>((resolve) => {
-    const agentsReqId = `ws-agents-${Date.now()}`;
-    const configReqId = `ws-config-${Date.now()}`;
-    let agentsList: any[] | null = null;
-    let defaultWorkspace: string | undefined = undefined;
-    let replies = 0;
-
-    const tryFinish = () => {
-      replies++;
-      if (replies < 2) return;
-      clearTimeout(timer);
-      gatewayWs.removeEventListener("message", onReply);
-      resolve({ agents: agentsList ?? [], defaultWorkspace });
-    };
-
-    const timer = setTimeout(() => {
-      gatewayWs.removeEventListener("message", onReply);
-      logger?.warn?.("workspace.read: gateway RPC timed out fetching agents/config");
-      resolve({ agents: agentsList ?? [], defaultWorkspace });
-    }, 5_000);
-
-    const onReply = (ev: MessageEvent) => {
-      const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
-      try {
-        const frame = JSON.parse(raw);
-        if (frame.type !== "res") return;
-
-        if (frame.id === agentsReqId) {
-          agentsList = frame.result?.agents ?? frame.payload?.agents ?? [];
-          if (!Array.isArray(agentsList)) agentsList = [];
-          logger?.info?.(`workspace.read: agents.list returned ${agentsList.length} agents`);
-          tryFinish();
-        } else if (frame.id === configReqId) {
-          const cfg = frame.result ?? frame.payload ?? {};
-          defaultWorkspace = cfg?.agents?.defaults?.workspace?.trim() || undefined;
-          logger?.info?.(`workspace.read: config.get defaultWorkspace=${defaultWorkspace ?? "(none)"}`);
-          tryFinish();
-        }
-      } catch { /* ignore parse errors on other messages */ }
-    };
-
-    gatewayWs.addEventListener("message", onReply);
-
-    // Fire both RPCs in parallel
-    logger?.info?.(`workspace.read: fetching agents (${agentsReqId}) and config (${configReqId}) from gateway`);
-    gatewayWs.send(JSON.stringify({
-      type: "req", id: agentsReqId, method: "agents.list", params: {},
-    }));
-    gatewayWs.send(JSON.stringify({
-      type: "req", id: configReqId, method: "config.get", params: {},
-    }));
-  });
-}
-
 /**
  * Relay frames bidirectionally between two WebSockets.
  *
  * Messages from `a` (sideclaw/bot-runner) heading to `b` (gateway) are
  * checked for `workspace.read` RPC requests. Matching requests are handled
- * locally; everything else is forwarded verbatim.
+ * locally using workspace info from the gateway config; everything else is
+ * forwarded verbatim.
  *
- * The relay lazily fetches the agent list from the gateway on the first
- * `workspace.read` request and caches it for subsequent calls.
- *
+ * @param cfg - Full gateway config (same object the original read-workspace plugin
+ *              accesses as `ctx.config`). Contains `agents.defaults.workspace` and
+ *              optionally `agents.list` for agent-specific overrides.
  * @param logger - Optional logger for workspace read operations
  */
 function relayFrames(
   a: WebSocket,
   b: WebSocket,
   signal: AbortSignal,
+  cfg: any,
   logger?: any,
 ): Promise<void> {
-  let cachedInfo: AgentInfo | null = null;
+  // Extract workspace info from config — same path as the read-workspace plugin
+  const agentsList: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+  const defaultWorkspace: string | undefined = cfg?.agents?.defaults?.workspace?.trim() || undefined;
 
   return new Promise<void>((resolve) => {
     let resolved = false;
@@ -252,13 +188,8 @@ function relayFrames(
         try {
           const frame = JSON.parse(raw) as RpcRequest;
           if (frame.type === "req" && frame.method === "workspace.read") {
-            // Fetch agent info from gateway (cached after first call), then handle locally
-            const infoPromise = cachedInfo !== null
-              ? Promise.resolve(cachedInfo)
-              : fetchAgentInfo(b, logger).then((info) => { cachedInfo = info; return info; });
-
-            infoPromise
-              .then((info) => handleWorkspaceRead(info.agents, frame.params as WorkspaceReadParams, logger, info.defaultWorkspace))
+            // Handle locally using workspace info from gateway config
+            handleWorkspaceRead(agentsList, frame.params as WorkspaceReadParams, logger, defaultWorkspace)
               .then((result) => {
                 const resp: RpcResponse = result.ok
                   ? { type: "res", id: frame.id, ok: true, payload: result.payload }
@@ -356,5 +287,5 @@ export async function startAccount(ctx: any): Promise<void> {
 
   // 7. Switch to generic bidirectional frame relay
   //    All GatewaySession RPC calls flow through from here.
-  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.logger);
+  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.cfg, ctx.logger);
 }

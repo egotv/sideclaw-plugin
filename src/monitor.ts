@@ -19,6 +19,8 @@
  */
 
 import { resolveGatewayToken, resolveGatewayUrl } from "./config.js";
+import { handleWorkspaceRead } from "./workspace.js";
+import type { RpcRequest, RpcResponse, WorkspaceReadParams } from "./types.js";
 
 /** Schemes permitted for the sideclaw WebSocket URL. */
 const ALLOWED_WS_SCHEMES = new Set(["ws:", "wss:"]);
@@ -141,12 +143,20 @@ function waitForMessage(
 
 /**
  * Relay frames bidirectionally between two WebSockets.
- * Resolves when either side closes or the abort signal fires.
+ *
+ * Messages from `a` (sideclaw/bot-runner) heading to `b` (gateway) are
+ * checked for `workspace.read` RPC requests. Matching requests are handled
+ * locally; everything else is forwarded verbatim.
+ *
+ * @param cfg - Gateway config for workspace resolution
+ * @param logger - Optional logger for workspace read operations
  */
 function relayFrames(
   a: WebSocket,
   b: WebSocket,
   signal: AbortSignal,
+  cfg: any,
+  logger?: any,
 ): Promise<void> {
   return new Promise<void>((resolve) => {
     let resolved = false;
@@ -164,8 +174,38 @@ function relayFrames(
     };
 
     const aToB = (ev: MessageEvent) => {
+      const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
+
+      // Fast string check — only parse if the message might be a workspace.read request
+      if (raw.includes('"workspace.read"')) {
+        try {
+          const frame = JSON.parse(raw) as RpcRequest;
+          if (frame.type === "req" && frame.method === "workspace.read") {
+            // Handle locally — don't forward to gateway
+            handleWorkspaceRead(cfg, frame.params as WorkspaceReadParams, logger)
+              .then((result) => {
+                const resp: RpcResponse = result.ok
+                  ? { type: "res", id: frame.id, ok: true, payload: result.payload }
+                  : { type: "res", id: frame.id, ok: false, error: { message: result.error } };
+                try { a.send(JSON.stringify(resp)); } catch { done(); }
+              })
+              .catch((err) => {
+                const resp: RpcResponse = {
+                  type: "res", id: frame.id, ok: false,
+                  error: { message: String(err) },
+                };
+                try { a.send(JSON.stringify(resp)); } catch { done(); }
+              });
+            return; // Don't forward to gateway
+          }
+        } catch {
+          // JSON parse failed — fall through to normal relay
+        }
+      }
+
       try { b.send(ev.data); } catch { done(); }
     };
+
     const bToA = (ev: MessageEvent) => {
       try { a.send(ev.data); } catch { done(); }
     };
@@ -240,5 +280,5 @@ export async function startAccount(ctx: any): Promise<void> {
 
   // 7. Switch to generic bidirectional frame relay
   //    All GatewaySession RPC calls flow through from here.
-  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal);
+  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.cfg, ctx.logger);
 }

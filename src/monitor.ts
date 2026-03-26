@@ -142,22 +142,62 @@ function waitForMessage(
 }
 
 /**
+ * Fetch the agent list from the gateway via an `agents.list` RPC call.
+ * Returns the agents array, or an empty array on failure.
+ */
+function fetchAgents(gatewayWs: WebSocket, logger?: any): Promise<any[]> {
+  return new Promise<any[]>((resolve) => {
+    const reqId = `ws-read-${Date.now()}`;
+    const timeout = setTimeout(() => {
+      gatewayWs.removeEventListener("message", onReply);
+      logger?.warn?.("workspace.read: agents.list RPC timed out");
+      resolve([]);
+    }, 5_000);
+
+    const onReply = (ev: MessageEvent) => {
+      const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
+      if (!raw.includes(reqId)) return;
+      try {
+        const frame = JSON.parse(raw);
+        if (frame.id === reqId && frame.type === "res") {
+          clearTimeout(timeout);
+          gatewayWs.removeEventListener("message", onReply);
+          const agents = frame.result?.agents ?? frame.payload?.agents ?? [];
+          resolve(Array.isArray(agents) ? agents : []);
+        }
+      } catch { /* ignore parse errors on other messages */ }
+    };
+
+    gatewayWs.addEventListener("message", onReply);
+    gatewayWs.send(JSON.stringify({
+      type: "req",
+      id: reqId,
+      method: "agents.list",
+      params: {},
+    }));
+  });
+}
+
+/**
  * Relay frames bidirectionally between two WebSockets.
  *
  * Messages from `a` (sideclaw/bot-runner) heading to `b` (gateway) are
  * checked for `workspace.read` RPC requests. Matching requests are handled
  * locally; everything else is forwarded verbatim.
  *
- * @param cfg - Gateway config for workspace resolution
+ * The relay lazily fetches the agent list from the gateway on the first
+ * `workspace.read` request and caches it for subsequent calls.
+ *
  * @param logger - Optional logger for workspace read operations
  */
 function relayFrames(
   a: WebSocket,
   b: WebSocket,
   signal: AbortSignal,
-  cfg: any,
   logger?: any,
 ): Promise<void> {
+  let cachedAgents: any[] | null = null;
+
   return new Promise<void>((resolve) => {
     let resolved = false;
     const done = () => {
@@ -181,8 +221,13 @@ function relayFrames(
         try {
           const frame = JSON.parse(raw) as RpcRequest;
           if (frame.type === "req" && frame.method === "workspace.read") {
-            // Handle locally — don't forward to gateway
-            handleWorkspaceRead(cfg, frame.params as WorkspaceReadParams, logger)
+            // Fetch agents from gateway (cached after first call), then handle locally
+            const agentsPromise = cachedAgents !== null
+              ? Promise.resolve(cachedAgents)
+              : fetchAgents(b, logger).then((agents) => { cachedAgents = agents; return agents; });
+
+            agentsPromise
+              .then((agents) => handleWorkspaceRead(agents, frame.params as WorkspaceReadParams, logger))
               .then((result) => {
                 const resp: RpcResponse = result.ok
                   ? { type: "res", id: frame.id, ok: true, payload: result.payload }
@@ -280,5 +325,5 @@ export async function startAccount(ctx: any): Promise<void> {
 
   // 7. Switch to generic bidirectional frame relay
   //    All GatewaySession RPC calls flow through from here.
-  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.cfg, ctx.logger);
+  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.logger);
 }

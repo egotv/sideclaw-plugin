@@ -95,10 +95,14 @@ function toWorkspaceRelative(filePath: string, workspaceRoot: string): string {
 }
 
 /**
- * Resolve workspace root from gateway agent config using sessionKey.
+ * Resolve workspace root from an agent list using sessionKey.
+ *
+ * Accepts agents in the format returned by the `agents.list` RPC:
+ *   `[{id, workspace, ...}, ...]`
+ *
  * No fallback to default workspace — fails explicitly if agent not found.
  */
-export function resolveWorkspace(cfg: any, sessionKey: string): string {
+export function resolveWorkspace(agents: any[], sessionKey: string): string {
   const key = sessionKey.trim();
   if (!key) {
     throw new Error("sessionKey is required for workspace resolution");
@@ -114,8 +118,8 @@ export function resolveWorkspace(cfg: any, sessionKey: string): string {
     throw new Error(`Cannot parse agent ID from sessionKey: ${key}`);
   }
 
-  const agents = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
-  const agentEntry = agents.find(
+  const list = Array.isArray(agents) ? agents : [];
+  const agentEntry = list.find(
     (a: any) => typeof a?.id === "string" && a.id.toLowerCase() === agentId,
   );
 
@@ -137,9 +141,11 @@ export function resolveWorkspace(cfg: any, sessionKey: string): string {
 /**
  * Top-level handler for workspace.read RPC.
  * Returns {ok, payload} or {ok: false, error} — never throws.
+ *
+ * @param agents - Agent list in the format from `agents.list` RPC: `[{id, workspace, ...}]`
  */
 export async function handleWorkspaceRead(
-  cfg: any,
+  agents: any[],
   params: WorkspaceReadParams,
   logger?: { warn?: (...args: any[]) => void; info?: (...args: any[]) => void },
 ): Promise<{ ok: true; payload: FileEntry[] } | { ok: false; error: string }> {
@@ -148,7 +154,7 @@ export async function handleWorkspaceRead(
       return { ok: false, error: "sessionKey is required for workspace.read" };
     }
 
-    const workspaceRoot = resolveWorkspace(cfg, params.sessionKey);
+    const workspaceRoot = resolveWorkspace(agents, params.sessionKey);
     await ensureWorkspaceExists(workspaceRoot);
 
     const recursive = params.recursive !== false;

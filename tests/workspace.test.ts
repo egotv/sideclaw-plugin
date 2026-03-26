@@ -184,48 +184,48 @@ describe("readFileEntry", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveWorkspace", () => {
-  const makeConfig = (agents: any[]) => ({ agents: { list: agents } });
+  const makeAgents = (agents: any[]) => agents;
 
   it("resolves workspace from agent config matching sessionKey", () => {
-    const cfg = makeConfig([{ id: "myagent", workspace: "/workspace/myagent" }]);
+    const cfg = makeAgents([{ id: "myagent", workspace: "/workspace/myagent" }]);
     const result = resolveWorkspace(cfg, "agent:myagent:session123");
     expect(result).toBe("/workspace/myagent");
   });
 
   it("is case-insensitive for agent id matching", () => {
-    const cfg = makeConfig([{ id: "MyAgent", workspace: "/workspace/myagent" }]);
+    const cfg = makeAgents([{ id: "MyAgent", workspace: "/workspace/myagent" }]);
     const result = resolveWorkspace(cfg, "agent:myagent:session123");
     expect(result).toBe("/workspace/myagent");
   });
 
   it("throws when agent not found", () => {
-    const cfg = makeConfig([{ id: "other", workspace: "/workspace/other" }]);
+    const cfg = makeAgents([{ id: "other", workspace: "/workspace/other" }]);
     expect(() => resolveWorkspace(cfg, "agent:myagent:session123")).toThrow(
       "Agent 'myagent' not found in gateway config",
     );
   });
 
   it("throws when no workspace configured", () => {
-    const cfg = makeConfig([{ id: "myagent" }]);
+    const cfg = makeAgents([{ id: "myagent" }]);
     expect(() => resolveWorkspace(cfg, "agent:myagent:session123")).toThrow(
       "No workspace configured for agent 'myagent'",
     );
   });
 
   it("throws when sessionKey is empty", () => {
-    const cfg = makeConfig([{ id: "myagent", workspace: "/workspace/myagent" }]);
+    const cfg = makeAgents([{ id: "myagent", workspace: "/workspace/myagent" }]);
     expect(() => resolveWorkspace(cfg, "   ")).toThrow("sessionKey is required");
   });
 
   it("throws when sessionKey has no agent prefix", () => {
-    const cfg = makeConfig([{ id: "myagent", workspace: "/workspace/myagent" }]);
+    const cfg = makeAgents([{ id: "myagent", workspace: "/workspace/myagent" }]);
     expect(() => resolveWorkspace(cfg, "notanagent")).toThrow(
       "Cannot parse agent ID",
     );
   });
 
   it("does NOT fall back to a default workspace", () => {
-    const cfg = makeConfig([{ id: "other", workspace: "/workspace/other" }]);
+    const cfg = makeAgents([{ id: "other", workspace: "/workspace/other" }]);
     expect(() => resolveWorkspace(cfg, "agent:unknown:session")).toThrow();
   });
 });
@@ -237,9 +237,7 @@ describe("resolveWorkspace", () => {
 describe("handleWorkspaceRead", () => {
   let tmpDir: string;
 
-  const makeConfig = (workspace: string) => ({
-    agents: { list: [{ id: "testagent", workspace }] },
-  });
+  const makeAgents = (workspace: string) => [{ id: "testagent", workspace }];
 
   const SESSION_KEY = "agent:testagent:session1";
 
@@ -254,7 +252,7 @@ describe("handleWorkspaceRead", () => {
   it("reads all files from workspace directory", async () => {
     await writeFile(tmpDir, "a.txt", "content-a");
     await writeFile(tmpDir, "b.txt", "content-b");
-    const cfg = makeConfig(tmpDir);
+    const cfg = makeAgents(tmpDir);
     const result = await handleWorkspaceRead(cfg, { sessionKey: SESSION_KEY });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -266,7 +264,7 @@ describe("handleWorkspaceRead", () => {
   it("reads files from a specific subdirectory", async () => {
     await writeFile(tmpDir, "root.txt", "root");
     await writeFile(tmpDir, "sub/deep.txt", "deep");
-    const cfg = makeConfig(tmpDir);
+    const cfg = makeAgents(tmpDir);
     const result = await handleWorkspaceRead(cfg, {
       sessionKey: SESSION_KEY,
       path: "sub",
@@ -279,7 +277,7 @@ describe("handleWorkspaceRead", () => {
   });
 
   it("returns error for missing sessionKey", async () => {
-    const cfg = makeConfig(tmpDir);
+    const cfg = makeAgents(tmpDir);
     const result = await handleWorkspaceRead(cfg, {});
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -287,7 +285,7 @@ describe("handleWorkspaceRead", () => {
   });
 
   it("returns error for path traversal attempt", async () => {
-    const cfg = makeConfig(tmpDir);
+    const cfg = makeAgents(tmpDir);
     const result = await handleWorkspaceRead(cfg, {
       sessionKey: SESSION_KEY,
       path: "../../etc/passwd",
@@ -298,7 +296,7 @@ describe("handleWorkspaceRead", () => {
   });
 
   it("returns empty array for non-existent path", async () => {
-    const cfg = makeConfig(tmpDir);
+    const cfg = makeAgents(tmpDir);
     const result = await handleWorkspaceRead(cfg, {
       sessionKey: SESSION_KEY,
       path: "does-not-exist",
@@ -310,7 +308,7 @@ describe("handleWorkspaceRead", () => {
 
   it("reads a single file when path points to a file", async () => {
     await writeFile(tmpDir, "single.txt", "only-me");
-    const cfg = makeConfig(tmpDir);
+    const cfg = makeAgents(tmpDir);
     const result = await handleWorkspaceRead(cfg, {
       sessionKey: SESSION_KEY,
       path: "single.txt",
@@ -323,8 +321,7 @@ describe("handleWorkspaceRead", () => {
   });
 
   it("returns error when agent is not found in config", async () => {
-    const cfg = { agents: { list: [] } };
-    const result = await handleWorkspaceRead(cfg, { sessionKey: SESSION_KEY });
+    const result = await handleWorkspaceRead([], { sessionKey: SESSION_KEY });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatch(/not found/i);

@@ -32,7 +32,7 @@ async function writeFile(dir: string, relPath: string, content: string): Promise
 /** Simulate the aToB fast-string-check + parse + dispatch logic from monitor.ts */
 async function simulateAToB(
   raw: string,
-  cfg: any,
+  agents: any[],
 ): Promise<{ intercepted: boolean; response: RpcResponse | null }> {
   // Fast string check
   if (!raw.includes('"workspace.read"')) {
@@ -51,7 +51,7 @@ async function simulateAToB(
     return { intercepted: false, response: null };
   }
 
-  const result = await handleWorkspaceRead(cfg, frame.params as WorkspaceReadParams);
+  const result = await handleWorkspaceRead(agents, frame.params as WorkspaceReadParams);
   const resp: RpcResponse = result.ok
     ? { type: "res", id: frame.id, ok: true, payload: result.payload }
     : { type: "res", id: frame.id, ok: false, error: { message: result.error } };
@@ -68,9 +68,7 @@ describe("aToB interception flow", () => {
   const AGENT_ID = "devagent";
   const SESSION_KEY = `agent:${AGENT_ID}:sess42`;
 
-  const makeConfig = (workspace: string) => ({
-    agents: { list: [{ id: AGENT_ID, workspace }] },
-  });
+  const makeAgents = (workspace: string) => [{ id: AGENT_ID, workspace }];
 
   beforeEach(async () => {
     tmpDir = await makeTmpDir();
@@ -82,7 +80,7 @@ describe("aToB interception flow", () => {
 
   it("intercepts a well-formed workspace.read request and returns correct RPC response", async () => {
     await writeFile(tmpDir, "hello.ts", "export const x = 1;");
-    const cfg = makeConfig(tmpDir);
+    const agents = makeAgents(tmpDir);
 
     const frame: RpcRequest = {
       type: "req",
@@ -91,7 +89,7 @@ describe("aToB interception flow", () => {
       params: { sessionKey: SESSION_KEY },
     };
 
-    const { intercepted, response } = await simulateAToB(JSON.stringify(frame), cfg);
+    const { intercepted, response } = await simulateAToB(JSON.stringify(frame), agents);
 
     expect(intercepted).toBe(true);
     expect(response).not.toBeNull();
@@ -104,7 +102,7 @@ describe("aToB interception flow", () => {
   });
 
   it("passes non-matching messages through without interception", async () => {
-    const cfg = makeConfig(tmpDir);
+    const agents = makeAgents(tmpDir);
 
     // Message that doesn't mention workspace.read at all
     const otherFrame = JSON.stringify({
@@ -114,25 +112,23 @@ describe("aToB interception flow", () => {
       params: {},
     });
 
-    const { intercepted, response } = await simulateAToB(otherFrame, cfg);
+    const { intercepted, response } = await simulateAToB(otherFrame, agents);
     expect(intercepted).toBe(false);
     expect(response).toBeNull();
   });
 
   it("falls through gracefully on JSON parse failure", async () => {
-    const cfg = makeConfig(tmpDir);
+    const agents = makeAgents(tmpDir);
 
     // Malformed JSON that still contains the fast-string trigger
     const malformed = '{"type":"req","method":"workspace.read" BROKEN JSON}';
 
-    const { intercepted, response } = await simulateAToB(malformed, cfg);
+    const { intercepted, response } = await simulateAToB(malformed, agents);
     expect(intercepted).toBe(false);
     expect(response).toBeNull();
   });
 
   it("returns error response for missing agent in config", async () => {
-    const emptyCfg = { agents: { list: [] } };
-
     const frame: RpcRequest = {
       type: "req",
       id: "rpc-003",
@@ -140,7 +136,7 @@ describe("aToB interception flow", () => {
       params: { sessionKey: SESSION_KEY },
     };
 
-    const { intercepted, response } = await simulateAToB(JSON.stringify(frame), emptyCfg);
+    const { intercepted, response } = await simulateAToB(JSON.stringify(frame), []);
 
     expect(intercepted).toBe(true);
     expect(response).not.toBeNull();
@@ -151,7 +147,7 @@ describe("aToB interception flow", () => {
   });
 
   it("passes through a message that mentions workspace.read but has type=res (not req)", async () => {
-    const cfg = makeConfig(tmpDir);
+    const agents = makeAgents(tmpDir);
 
     // A response frame that happens to contain "workspace.read" in payload
     const responseFrame = JSON.stringify({
@@ -161,12 +157,12 @@ describe("aToB interception flow", () => {
       payload: { method: "workspace.read", files: [] },
     });
 
-    const { intercepted } = await simulateAToB(responseFrame, cfg);
+    const { intercepted } = await simulateAToB(responseFrame, agents);
     expect(intercepted).toBe(false);
   });
 
   it("returns error response when sessionKey is missing from params", async () => {
-    const cfg = makeConfig(tmpDir);
+    const agents = makeAgents(tmpDir);
 
     const frame: RpcRequest = {
       type: "req",
@@ -175,7 +171,7 @@ describe("aToB interception flow", () => {
       params: {},
     };
 
-    const { intercepted, response } = await simulateAToB(JSON.stringify(frame), cfg);
+    const { intercepted, response } = await simulateAToB(JSON.stringify(frame), agents);
 
     expect(intercepted).toBe(true);
     expect(response!.ok).toBe(false);
@@ -185,7 +181,7 @@ describe("aToB interception flow", () => {
 
   it("builds RPC response with correct id from request", async () => {
     await writeFile(tmpDir, "file.ts", "const a = 1;");
-    const cfg = makeConfig(tmpDir);
+    const agents = makeAgents(tmpDir);
     const requestId = "unique-request-id-xyz";
 
     const frame: RpcRequest = {
@@ -195,7 +191,7 @@ describe("aToB interception flow", () => {
       params: { sessionKey: SESSION_KEY },
     };
 
-    const { response } = await simulateAToB(JSON.stringify(frame), cfg);
+    const { response } = await simulateAToB(JSON.stringify(frame), agents);
     expect(response!.id).toBe(requestId);
   });
 });

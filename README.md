@@ -62,7 +62,11 @@ openclaw config set channels.sideclaw.pairingToken "sk_pair_YOUR_TOKEN_HERE"
 
 ## How It Works
 
-OpenClaw gateways typically run on a user's local machine behind NAT, so SideClaw cannot reach the gateway directly. This plugin uses a reverse connection pattern: it dials out from the gateway to SideClaw rather than waiting to be dialed. On startup, the plugin connects to the local gateway WebSocket first and buffers the `connect.challenge` message before opening a second connection to SideClaw. The buffered challenge is forwarded to SideClaw immediately after the connection opens, which prevents the gateway from timing out while waiting for a handshake response. Once both sides complete the handshake, the plugin becomes a transparent bidirectional frame relay for the lifetime of the session. If either side disconnects, the gateway's ChannelManager restarts `startAccount()` with backoff.
+OpenClaw gateways typically run on a user's local machine behind NAT, so SideClaw cannot reach the gateway directly. This plugin uses a reverse connection pattern: it dials out from the gateway to SideClaw rather than waiting to be dialed. On startup, the plugin connects to the local gateway WebSocket first and buffers the `connect.challenge` message before opening a second connection to SideClaw. The buffered challenge is forwarded to SideClaw immediately after the connection opens, which prevents the gateway from timing out while waiting for a handshake response. Once both sides complete the handshake, the plugin becomes a bidirectional frame relay for the lifetime of the session. If either side disconnects, the gateway's ChannelManager restarts `startAccount()` with backoff.
+
+### Workspace file reading
+
+The relay intercepts `workspace.read` RPC requests from the SideClaw server. Instead of forwarding these to the gateway (which can't serve files back over NAT), the relay reads files directly from the local filesystem using the workspace path from the gateway config (`agents.defaults.workspace`). A fast string pre-check avoids JSON parsing overhead on non-matching frames.
 
 ## Security
 
@@ -72,13 +76,27 @@ OpenClaw gateways typically run on a user's local machine behind NAT, so SideCla
 
 ## Development
 
-After cloning and installing (see "From source" above), run type checking with:
+After cloning and installing (see "From source" above):
 
 ```bash
-npm run type-check
+npm run type-check   # TypeScript check
+npm test             # Run tests (vitest)
 ```
 
-The package ships raw TypeScript with no runtime dependencies. TypeScript is the only build-time requirement.
+The package ships raw TypeScript with no runtime dependencies. TypeScript and vitest are the only dev-time requirements.
+
+### File structure
+
+| File | Purpose |
+|------|---------|
+| `src/index.ts` | Plugin entry — `register(api)` |
+| `src/channel.ts` | ChannelPlugin shape — id, meta, capabilities, config |
+| `src/monitor.ts` | `startAccount()` — buffered handshake + relay with `workspace.read` interception |
+| `src/config.ts` | `SideClawAccount` type, `resolveGatewayToken/Url` |
+| `src/types.ts` | RPC frame types (`RpcRequest`, `RpcResponse`, `WorkspaceReadParams`, `FileEntry`) |
+| `src/workspace.ts` | Local workspace file reading — `handleWorkspaceRead()`, `resolveWorkspace()`, `collectFiles()` |
+| `tests/workspace.test.ts` | Workspace module tests (file reading, path traversal, resolution) |
+| `tests/intercept.test.ts` | RPC interception flow tests |
 
 ## License
 

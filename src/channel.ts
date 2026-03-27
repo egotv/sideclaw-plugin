@@ -6,10 +6,11 @@
  * opt-in and not needed for a transparent relay channel.
  */
 
+import type { ChannelGatewayContext, ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveAccount, inspectAccount, type SideClawAccount } from "./config.js";
 import { startAccount } from "./monitor.js";
 
-export const sideClawChannel = {
+export const sideClawChannel: ChannelPlugin = {
   id: "sideclaw",
 
   meta: {
@@ -26,23 +27,23 @@ export const sideClawChannel = {
   },
 
   config: {
-    listAccountIds(cfg: any): string[] {
+    listAccountIds(cfg: OpenClawConfig): string[] {
       const sideclaw = cfg?.channels?.sideclaw;
       if (!sideclaw?.enabled || !sideclaw?.sideClawUrl) return [];
       return ["sideclaw"];
     },
 
-    resolveAccount(cfg: any, accountId?: string | null): SideClawAccount {
+    resolveAccount(cfg: OpenClawConfig, accountId?: string | null): SideClawAccount {
       return resolveAccount(cfg, accountId ?? undefined);
     },
 
-    inspectAccount(cfg: any, accountId?: string) {
+    inspectAccount(cfg: OpenClawConfig, accountId?: string | null) {
       return inspectAccount(cfg, accountId);
     },
   },
 
   gateway: {
-    async startAccount(ctx: any): Promise<void> {
+    async startAccount(ctx: ChannelGatewayContext<SideClawAccount>): Promise<void> {
       await startAccount(ctx);
     },
   },

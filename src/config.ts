@@ -1,3 +1,5 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk";
+
 /**
  * Typed config resolver for the sideclaw channel plugin.
  *
@@ -14,11 +16,11 @@ export type SideClawAccount = {
   pairingToken?: string;
 };
 
-export function resolveAccount(raw: Record<string, unknown>, accountId?: string): SideClawAccount {
+export function resolveAccount(cfg: OpenClawConfig, accountId?: string): SideClawAccount {
   if (accountId && accountId !== "sideclaw") {
     console.warn(`sideclaw: unexpected accountId "${accountId}", only "sideclaw" is supported`);
   }
-  const sideclaw = (raw as any)?.channels?.sideclaw ?? {};
+  const sideclaw = cfg.channels?.sideclaw ?? {};
   const sideClawUrl = typeof sideclaw.sideClawUrl === "string" ? sideclaw.sideClawUrl.trim() : "";
 
   return {
@@ -34,12 +36,12 @@ export function resolveAccount(raw: Record<string, unknown>, accountId?: string)
  * Inspect account status without materializing secrets.
  * Used by the gateway dashboard and health checks.
  */
-export function inspectAccount(raw: Record<string, unknown>, accountId?: string): {
+export function inspectAccount(cfg: OpenClawConfig, _accountId?: string | null): {
   enabled: boolean;
   configured: boolean;
   tokenStatus: "available" | "missing";
 } {
-  const sideclaw = (raw as any)?.channels?.sideclaw ?? {};
+  const sideclaw = cfg.channels?.sideclaw ?? {};
   const sideClawUrl = typeof sideclaw.sideClawUrl === "string" && sideclaw.sideClawUrl.trim().length > 0;
   const hasPairingToken = typeof sideclaw.pairingToken === "string" && sideclaw.pairingToken.length > 0;
 
@@ -54,13 +56,12 @@ export function inspectAccount(raw: Record<string, unknown>, accountId?: string)
  * Resolve the gateway token from the running gateway config or environment.
  * The plugin pushes this to sideclaw so it can complete the standard handshake.
  */
-export function resolveGatewayToken(cfg: Record<string, unknown>): string {
+export function resolveGatewayToken(cfg: OpenClawConfig): string {
   // Prefer environment variable, fall back to config
   const envToken = process.env.OPENCLAW_GATEWAY_TOKEN;
   if (envToken) return envToken;
 
-  const gateway = (cfg as any)?.gateway ?? {};
-  const token = gateway?.auth?.token;
+  const token = cfg.gateway?.auth?.token;
   if (typeof token === "string" && token.length > 0) return token;
 
   throw new Error(
@@ -72,8 +73,7 @@ export function resolveGatewayToken(cfg: Record<string, unknown>): string {
  * Resolve the gateway's local WS URL for the loopback relay connection.
  * The plugin connects here and relays frames to/from sideclaw.
  */
-export function resolveGatewayUrl(cfg: Record<string, unknown>): string {
-  const gateway = (cfg as any)?.gateway ?? {};
-  const port = gateway?.port ?? 18789;
+export function resolveGatewayUrl(cfg: OpenClawConfig): string {
+  const port = cfg.gateway?.port ?? 18789;
   return `ws://127.0.0.1:${port}`;
 }

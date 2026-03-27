@@ -7,9 +7,10 @@
  * for RPC communication.
  */
 
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { sideClawChannel } from "./channel.js";
 
-export default function register(api: any) {
+export default function register(api: OpenClawPluginApi) {
   api.registerChannel({ plugin: sideClawChannel });
-  api.logger.debug?.("sideclaw: channel registered");
+  api.logger.info("sideclaw: channel registered");
 }

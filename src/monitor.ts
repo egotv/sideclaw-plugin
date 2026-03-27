@@ -18,7 +18,9 @@
  * to sideclaw, we ensure the handshake completes before the timeout.
  */
 
+import type { ChannelGatewayContext, OpenClawConfig, PluginLogger } from "openclaw/plugin-sdk";
 import { resolveGatewayToken, resolveGatewayUrl } from "./config.js";
+import type { SideClawAccount } from "./config.js";
 import { handleWorkspaceRead } from "./workspace.js";
 import type { RpcRequest, RpcResponse, WorkspaceReadParams } from "./types.js";
 
@@ -53,7 +55,7 @@ export function validateWsUrl(raw: string, label: string): URL {
  * Warn if a token is about to be sent over a plaintext connection
  * to a non-loopback host.
  */
-export function checkPlaintextToken(url: URL, logger?: any): void {
+export function checkPlaintextToken(url: URL, logger?: PluginLogger): void {
   if (url.protocol === "wss:") return; // encrypted — fine
   if (LOOPBACK_HOSTS.has(url.hostname)) return; // local dev — acceptable
 
@@ -158,12 +160,12 @@ function relayFrames(
   a: WebSocket,
   b: WebSocket,
   signal: AbortSignal,
-  cfg: any,
-  logger?: any,
+  cfg: OpenClawConfig,
+  logger?: PluginLogger,
 ): Promise<void> {
   // Extract workspace info from config — same path as the read-workspace plugin
-  const agentsList: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
-  const defaultWorkspace: string | undefined = cfg?.agents?.defaults?.workspace?.trim() || undefined;
+  const agentsList = cfg.agents?.list ?? [];
+  const defaultWorkspace = cfg.agents?.defaults?.workspace?.trim() || undefined;
 
   return new Promise<void>((resolve) => {
     let resolved = false;
@@ -230,7 +232,7 @@ function relayFrames(
 /**
  * Long-lived task: buffer challenge, dial sideclaw, relay handshake, then relay frames.
  */
-export async function startAccount(ctx: any): Promise<void> {
+export async function startAccount(ctx: ChannelGatewayContext<SideClawAccount>): Promise<void> {
   const { sideClawUrl } = ctx.account;
   const gatewayToken = resolveGatewayToken(ctx.cfg);
   const pairingToken = ctx.account.pairingToken;
@@ -247,7 +249,7 @@ export async function startAccount(ctx: any): Promise<void> {
   validateWsUrl(gatewayUrl, "gatewayUrl");
 
   // Warn if sending token over plaintext to a remote host
-  checkPlaintextToken(sideClawParsed, ctx.logger);
+  checkPlaintextToken(sideClawParsed, ctx.log);
 
   // 1. Connect to gateway FIRST — it sends connect.challenge immediately
   const gatewayWs = await connectWithAbort(gatewayUrl, ctx.abortSignal);
@@ -257,7 +259,7 @@ export async function startAccount(ctx: any): Promise<void> {
 
   // 3. Dial sideclaw
   const sideClawWs = await connectWithAbort(sideClawUrl, ctx.abortSignal);
-  ctx.setStatus({ connected: false, lastError: undefined });
+  ctx.setStatus({ accountId: ctx.accountId, connected: false, lastError: null });
 
   // 4. Send pre-handshake — delivers identity token (pairing or gateway) for routing,
   //    plus the gateway token so sideclaw can sign the handshake correctly.
@@ -282,10 +284,10 @@ export async function startAccount(ctx: any): Promise<void> {
   const helloRaw = await waitForMessage(gatewayWs, ctx.abortSignal);
   sideClawWs.send(helloRaw);
 
-  ctx.setStatus({ connected: true });
-  ctx.logger?.info?.("sideclaw: handshake complete, ready");
+  ctx.setStatus({ accountId: ctx.accountId, connected: true });
+  ctx.log?.info("sideclaw: handshake complete, ready");
 
   // 7. Switch to generic bidirectional frame relay
   //    All GatewaySession RPC calls flow through from here.
-  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.cfg, ctx.logger);
+  await relayFrames(sideClawWs, gatewayWs, ctx.abortSignal, ctx.cfg, ctx.log);
 }

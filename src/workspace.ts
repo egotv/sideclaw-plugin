@@ -1,5 +1,6 @@
 // src/workspace.ts
 
+import type { PluginLogger } from "openclaw/plugin-sdk";
 import path from "node:path";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
@@ -106,7 +107,7 @@ function toWorkspaceRelative(filePath: string, workspaceRoot: string): string {
  *   3. Error — no workspace available
  */
 export function resolveWorkspace(
-  agents: any[],
+  agents: Array<{ id: string; workspace?: string }>,
   sessionKey: string,
   defaultWorkspace?: string,
 ): string {
@@ -128,7 +129,7 @@ export function resolveWorkspace(
   // Try agent-specific workspace first
   const list = Array.isArray(agents) ? agents : [];
   const agentEntry = list.find(
-    (a: any) => typeof a?.id === "string" && a.id.toLowerCase() === agentId,
+    (a) => a.id.toLowerCase() === agentId,
   );
 
   const agentWorkspace = agentEntry?.workspace?.trim();
@@ -152,9 +153,9 @@ export function resolveWorkspace(
  * @param defaultWorkspace - Fallback workspace from `agents.defaults.workspace`
  */
 export async function handleWorkspaceRead(
-  agents: any[],
+  agents: Array<{ id: string; workspace?: string }>,
   params: WorkspaceReadParams,
-  logger?: { warn?: (...args: any[]) => void; info?: (...args: any[]) => void },
+  logger?: PluginLogger,
   defaultWorkspace?: string,
 ): Promise<{ ok: true; payload: FileEntry[] } | { ok: false; error: string }> {
   try {
@@ -168,7 +169,7 @@ export async function handleWorkspaceRead(
     const recursive = params.recursive !== false;
     const requestedPath = params.path?.trim();
 
-    logger?.info?.(
+    logger?.info(
       `workspace.read: path=${requestedPath ?? "."} recursive=${recursive} agent-session=${params.sessionKey}`,
     );
 
@@ -205,7 +206,7 @@ export async function handleWorkspaceRead(
       try {
         entries.push(await readFileEntry(filePath, workspaceRoot));
       } catch (err) {
-        logger?.warn?.(`workspace.read: skipping ${path.relative(workspaceRoot, filePath)}: ${err}`);
+        logger?.warn(`workspace.read: skipping ${path.relative(workspaceRoot, filePath)}: ${err}`);
       }
     }
 
